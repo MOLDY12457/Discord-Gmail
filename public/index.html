@@ -52,7 +52,7 @@
         return;
       }
       console.log('Connexion à Socket.IO avec pseudo:', username);
-      socket = io('BACKEND_URL', { 
+      socket = io('https://discord-gmail-backend.onrender.com', { 
       query: { username },
       transports: ['websocket', 'polling']
     });
