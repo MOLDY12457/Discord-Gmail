@@ -1,9 +1,48 @@
-<!DOCTYPE html>
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat et Appels entre Potes</title>
+  <title>Chat Général et Appels</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
@@ -12,13 +51,16 @@
     <input id="username" placeholder="Ton pseudo" class="p-2 mb-2 rounded">
     <button onclick="joinChat()" class="bg-blue-500 text-white p-2 rounded mb-2">Rejoindre</button>
     <div class="flex-1 overflow-y-auto mb-2 bg-white rounded p-2" id="messages"></div>
-    <select id="recipient" class="p-2 mb-2 rounded">
-      <option value="">Choisir un pote</option>
-    </select>
     <input id="message" placeholder="Ton message" class="p-2 mb-2 rounded">
     <button onclick="sendMessage()" class="bg-blue-500 text-white p-2 rounded">Envoyer</button>
-    <button onclick="startCall()" class="bg-green-500 text-white p-2 rounded mt-2" id="callButton" disabled>Appeler</button>
-    <button onclick="endCall()" class="bg-red-500 text-white p-2 rounded mt-2 hidden" id="endCallButton">Terminer l'appel</button>
+    <select id="recipient" class="p-2 mb-2 rounded">
+      <option value="">Choisir un pote pour appeler</option>
+    </select>
+    <div class="flex space-x-2 mb-2">
+      <button onclick="startCall('video')" class="bg-green-500 text-white p-2 rounded" id="callButton" disabled>Appel Vidéo</button>
+      <button onclick="startCall('screen')" class="bg-green-600 text-white p-2 rounded" id="screenShareButton" disabled>Partager l'écran</button>
+      <button onclick="endCall()" class="bg-red-500 text-white p-2 rounded hidden" id="endCallButton">Terminer l'appel</button>
+    </div>
     <div class="flex mt-2">
       <video id="localVideo" autoplay muted class="w-1/2 h-64 bg-black mr-2"></video>
       <video id="remoteVideo" autoplay class="w-1/2 h-64 bg-black"></video>
@@ -52,15 +94,17 @@
         return;
       }
       console.log('Connexion à Socket.IO avec pseudo:', username);
-      socket = io('https://discord-gmail-backend.onrender.com', { 
-      query: { username },
-      transports: ['websocket', 'polling']
-    });
+      socket = io('http://localhost:3000', { 
+        query: { username },
+        transports: ['websocket', 'polling'],
+        timeout: 20000
+      });
       
       socket.on('connect', () => {
         console.log('Connecté à Socket.IO ! ID:', socket.id);
         document.getElementById('username').disabled = true;
         document.getElementById('callButton').disabled = false;
+        document.getElementById('screenShareButton').disabled = false;
       });
       
       socket.on('connect_error', (error) => {
@@ -101,7 +145,7 @@
     function updateUsers(users) {
       console.log('Mise à jour des utilisateurs:', users);
       const recipientSelect = document.getElementById('recipient');
-      recipientSelect.innerHTML = '<option value="">Choisir un pote</option>';
+      recipientSelect.innerHTML = '<option value="">Choisir un pote pour appeler</option>';
       users.forEach(user => {
         if (user.id !== socket.id) {
           const option = document.createElement('option');
@@ -113,6 +157,7 @@
       recipientSelect.onchange = () => {
         recipientId = recipientSelect.value;
         document.getElementById('callButton').disabled = !recipientId;
+        document.getElementById('screenShareButton').disabled = !recipientId;
         console.log('Pote sélectionné:', recipientId);
       };
     }
@@ -128,28 +173,32 @@
 
     function sendMessage() {
       const message = document.getElementById('message').value;
-      if (message && recipientId) {
-        console.log('Envoi message à:', recipientId);
-        socket.emit('message', { to: recipientId, from: username, text: message });
+      if (message) {
+        console.log('Envoi message général:', message);
+        socket.emit('message', { from: username, text: message });
         displayMessage({ from: username, text: message });
         document.getElementById('message').value = '';
       } else {
-        console.error('Erreur: Pas de destinataire ou message vide');
+        console.error('Erreur: Message vide');
       }
     }
 
-    async function startCall() {
+    async function startCall(type) {
       recipientId = document.getElementById('recipient').value;
       if (!recipientId) {
         console.error('Erreur: Pas de pote sélectionné');
         alert('Choisis un pote !');
         return;
       }
-      console.log('Démarrage appel vers:', recipientId);
+      console.log(`Démarrage appel (${type}) vers:`, recipientId);
 
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        console.log('Accès caméra/micro OK');
+        if (type === 'screen') {
+          localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        } else {
+          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        }
+        console.log('Accès média OK:', type);
         document.getElementById('localVideo').srcObject = localStream;
 
         peerConnection = new RTCPeerConnection(configuration);
@@ -173,10 +222,11 @@
         socket.emit('offer', { to: recipientId, offer });
 
         document.getElementById('callButton').classList.add('hidden');
+        document.getElementById('screenShareButton').classList.add('hidden');
         document.getElementById('endCallButton').classList.remove('hidden');
       } catch (error) {
-        console.error('Erreur getUserMedia:', error);
-        alert('Erreur accès caméra/micro: ' + error.message);
+        console.error('Erreur getUserMedia/getDisplayMedia:', error);
+        alert('Erreur accès média: ' + error.message);
       }
     }
 
@@ -206,6 +256,7 @@
       await peerConnection.setLocalDescription(answer);
       socket.emit('answer', { to: data.from, answer });
       document.getElementById('callButton').classList.add('hidden');
+      document.getElementById('screenShareButton').classList.add('hidden');
       document.getElementById('endCallButton').classList.remove('hidden');
     }
 
@@ -231,11 +282,15 @@
       document.getElementById('localVideo').srcObject = null;
       document.getElementById('remoteVideo').srcObject = null;
       document.getElementById('callButton').classList.remove('hidden');
+      document.getElementById('screenShareButton').classList.remove('hidden');
       document.getElementById('endCallButton').classList.add('hidden');
     }
 
-    document.getElementById('message').addEventListener('keypress', e => {
-      if (e.key === 'Enter') sendMessage();
+    document.getElementById('message').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        console.log('Touche Entrée pressée');
+        sendMessage();
+      }
     });
   </script>
 </body>
