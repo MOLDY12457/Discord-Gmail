@@ -31,35 +31,89 @@
     let peerConnection;
     let username = '';
     let recipientId = '';
-    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const configuration = { 
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+        { 
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
+      ] 
+    };
 
     function joinChat() {
+      console.log('joinChat appelé');
       username = document.getElementById('username').value;
-      if (!username) return alert('Entre un pseudo !');
-      socket = io('https://<your-render-backend-url>.onrender.com', { query: { username } });
-      socket.on('users', updateUsers);
-      socket.on('message', displayMessage);
-      socket.on('offer', handleOffer);
-      socket.on('answer', handleAnswer);
-      socket.on('ice-candidate', handleIceCandidate);
-      document.getElementById('username').disabled = true;
-      document.getElementById('callButton').disabled = false;
+      if (!username) {
+        console.error('Erreur: Pseudo vide');
+        alert('Entre un pseudo !');
+        return;
+      }
+      console.log('Connexion à Socket.IO avec pseudo:', username);
+      socket = io('BACKEND_URL', { 
+      query: { username },
+      transports: ['websocket', 'polling']
+    });
+      
+      socket.on('connect', () => {
+        console.log('Connecté à Socket.IO ! ID:', socket.id);
+        document.getElementById('username').disabled = true;
+        document.getElementById('callButton').disabled = false;
+      });
+      
+      socket.on('connect_error', (error) => {
+        console.error('Erreur de connexion Socket.IO:', error.message);
+        alert('Erreur de connexion au serveur: ' + error.message);
+      });
+      
+      socket.on('disconnect', (reason) => {
+        console.log('Déconnexion Socket.IO:', reason);
+      });
+
+      socket.on('users', (users) => {
+        console.log('Liste des utilisateurs reçue:', users);
+        updateUsers(users);
+      });
+      
+      socket.on('message', (msg) => {
+        console.log('Message reçu:', msg);
+        displayMessage(msg);
+      });
+      
+      socket.on('offer', (data) => {
+        console.log('Offer WebRTC reçu de:', data.from);
+        handleOffer(data);
+      });
+      
+      socket.on('answer', (data) => {
+        console.log('Answer WebRTC reçu');
+        handleAnswer(data);
+      });
+      
+      socket.on('ice-candidate', (data) => {
+        console.log('ICE candidate reçu');
+        handleIceCandidate(data);
+      });
     }
 
     function updateUsers(users) {
+      console.log('Mise à jour des utilisateurs:', users);
       const recipientSelect = document.getElementById('recipient');
       recipientSelect.innerHTML = '<option value="">Choisir un pote</option>';
       users.forEach(user => {
         if (user.id !== socket.id) {
           const option = document.createElement('option');
           option.value = user.id;
-          option.textContent = user.name;
+          option.textContent = user.name || user.username;
           recipientSelect.appendChild(option);
         }
       });
       recipientSelect.onchange = () => {
         recipientId = recipientSelect.value;
         document.getElementById('callButton').disabled = !recipientId;
+        console.log('Pote sélectionné:', recipientId);
       };
     }
 
@@ -75,71 +129,97 @@
     function sendMessage() {
       const message = document.getElementById('message').value;
       if (message && recipientId) {
+        console.log('Envoi message à:', recipientId);
         socket.emit('message', { to: recipientId, from: username, text: message });
         displayMessage({ from: username, text: message });
         document.getElementById('message').value = '';
+      } else {
+        console.error('Erreur: Pas de destinataire ou message vide');
       }
     }
 
     async function startCall() {
       recipientId = document.getElementById('recipient').value;
-      if (!recipientId) return alert('Choisis un pote !');
+      if (!recipientId) {
+        console.error('Erreur: Pas de pote sélectionné');
+        alert('Choisis un pote !');
+        return;
+      }
+      console.log('Démarrage appel vers:', recipientId);
 
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      document.getElementById('localVideo').srcObject = localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        console.log('Accès caméra/micro OK');
+        document.getElementById('localVideo').srcObject = localStream;
 
-      peerConnection = new RTCPeerConnection(configuration);
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        peerConnection = new RTCPeerConnection(configuration);
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
-      peerConnection.ontrack = event => {
-        document.getElementById('remoteVideo').srcObject = event.streams[0];
-      };
-      peerConnection.onicecandidate = event => {
-        if (event.candidate) {
-          socket.emit('ice-candidate', { to: recipientId, candidate: event.candidate });
-        }
-      };
+        peerConnection.ontrack = event => {
+          console.log('Stream remote reçu');
+          document.getElementById('remoteVideo').srcObject = event.streams[0];
+        };
+        
+        peerConnection.onicecandidate = event => {
+          if (event.candidate) {
+            console.log('Envoi ICE candidate');
+            socket.emit('ice-candidate', { to: recipientId, candidate: event.candidate });
+          }
+        };
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('offer', { to: recipientId, offer });
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        console.log('Envoi offer WebRTC');
+        socket.emit('offer', { to: recipientId, offer });
 
-      document.getElementById('callButton').classList.add('hidden');
-      document.getElementById('endCallButton').classList.remove('hidden');
+        document.getElementById('callButton').classList.add('hidden');
+        document.getElementById('endCallButton').classList.remove('hidden');
+      } catch (error) {
+        console.error('Erreur getUserMedia:', error);
+        alert('Erreur accès caméra/micro: ' + error.message);
+      }
     }
 
-    async function handleOffer({ from, offer }) {
+    async function handleOffer(data) {
+      console.log('Gestion offer de:', data.from);
       if (!peerConnection) {
         peerConnection = new RTCPeerConnection(configuration);
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        document.getElementById('localVideo').srcObject = localStream;
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          document.getElementById('localVideo').srcObject = localStream;
+          localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        } catch (error) {
+          console.error('Erreur getUserMedia dans handleOffer:', error);
+          return;
+        }
         peerConnection.ontrack = event => {
           document.getElementById('remoteVideo').srcObject = event.streams[0];
         };
         peerConnection.onicecandidate = event => {
           if (event.candidate) {
-            socket.emit('ice-candidate', { to: from, candidate: event.candidate });
+            socket.emit('ice-candidate', { to: data.from, candidate: event.candidate });
           }
         };
       }
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      socket.emit('answer', { to: from, answer });
+      socket.emit('answer', { to: data.from, answer });
       document.getElementById('callButton').classList.add('hidden');
       document.getElementById('endCallButton').classList.remove('hidden');
     }
 
-    async function handleAnswer({ answer }) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    async function handleAnswer(data) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      console.log('Answer appliqué');
     }
 
-    async function handleIceCandidate({ candidate }) {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    async function handleIceCandidate(data) {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
 
     function endCall() {
+      console.log('Fin d\'appel');
       if (peerConnection) {
         peerConnection.close();
         peerConnection = null;
