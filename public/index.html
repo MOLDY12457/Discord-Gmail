@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat et Appels entre Potes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <div class="flex flex-col h-screen bg-gray-100 p-4">
+    <input id="username" placeholder="Ton pseudo" class="p-2 mb-2 rounded">
+    <button onclick="joinChat()" class="bg-blue-500 text-white p-2 rounded mb-2">Rejoindre</button>
+    <div class="flex-1 overflow-y-auto mb-2 bg-white rounded p-2" id="messages"></div>
+    <select id="recipient" class="p-2 mb-2 rounded">
+      <option value="">Choisir un pote</option>
+    </select>
+    <input id="message" placeholder="Ton message" class="p-2 mb-2 rounded">
+    <button onclick="sendMessage()" class="bg-blue-500 text-white p-2 rounded">Envoyer</button>
+    <button onclick="startCall()" class="bg-green-500 text-white p-2 rounded mt-2" id="callButton" disabled>Appeler</button>
+    <button onclick="endCall()" class="bg-red-500 text-white p-2 rounded mt-2 hidden" id="endCallButton">Terminer l'appel</button>
+    <div class="flex mt-2">
+      <video id="localVideo" autoplay muted class="w-1/2 h-64 bg-black mr-2"></video>
+      <video id="remoteVideo" autoplay class="w-1/2 h-64 bg-black"></video>
+    </div>
+  </div>
+
+  <script>
+    let socket;
+    let localStream;
+    let peerConnection;
+    let username = '';
+    let recipientId = '';
+    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    function joinChat() {
+      username = document.getElementById('username').value;
+      if (!username) return alert('Entre un pseudo !');
+      socket = io('https://<your-render-backend-url>.onrender.com', { query: { username } });
+      socket.on('users', updateUsers);
+      socket.on('message', displayMessage);
+      socket.on('offer', handleOffer);
+      socket.on('answer', handleAnswer);
+      socket.on('ice-candidate', handleIceCandidate);
+      document.getElementById('username').disabled = true;
+      document.getElementById('callButton').disabled = false;
+    }
+
+    function updateUsers(users) {
+      const recipientSelect = document.getElementById('recipient');
+      recipientSelect.innerHTML = '<option value="">Choisir un pote</option>';
+      users.forEach(user => {
+        if (user.id !== socket.id) {
+          const option = document.createElement('option');
+          option.value = user.id;
+          option.textContent = user.name;
+          recipientSelect.appendChild(option);
+        }
+      });
+      recipientSelect.onchange = () => {
+        recipientId = recipientSelect.value;
+        document.getElementById('callButton').disabled = !recipientId;
+      };
+    }
+
+    function displayMessage(msg) {
+      const messages = document.getElementById('messages');
+      const div = document.createElement('div');
+      div.textContent = `${msg.from}: ${msg.text}`;
+      div.className = 'p-2 bg-gray-200 rounded mb-1';
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function sendMessage() {
+      const message = document.getElementById('message').value;
+      if (message && recipientId) {
+        socket.emit('message', { to: recipientId, from: username, text: message });
+        displayMessage({ from: username, text: message });
+        document.getElementById('message').value = '';
+      }
+    }
+
+    async function startCall() {
+      recipientId = document.getElementById('recipient').value;
+      if (!recipientId) return alert('Choisis un pote !');
+
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      document.getElementById('localVideo').srcObject = localStream;
+
+      peerConnection = new RTCPeerConnection(configuration);
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+      peerConnection.ontrack = event => {
+        document.getElementById('remoteVideo').srcObject = event.streams[0];
+      };
+      peerConnection.onicecandidate = event => {
+        if (event.candidate) {
+          socket.emit('ice-candidate', { to: recipientId, candidate: event.candidate });
+        }
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.emit('offer', { to: recipientId, offer });
+
+      document.getElementById('callButton').classList.add('hidden');
+      document.getElementById('endCallButton').classList.remove('hidden');
+    }
+
+    async function handleOffer({ from, offer }) {
+      if (!peerConnection) {
+        peerConnection = new RTCPeerConnection(configuration);
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        document.getElementById('localVideo').srcObject = localStream;
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        peerConnection.ontrack = event => {
+          document.getElementById('remoteVideo').srcObject = event.streams[0];
+        };
+        peerConnection.onicecandidate = event => {
+          if (event.candidate) {
+            socket.emit('ice-candidate', { to: from, candidate: event.candidate });
+          }
+        };
+      }
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      socket.emit('answer', { to: from, answer });
+      document.getElementById('callButton').classList.add('hidden');
+      document.getElementById('endCallButton').classList.remove('hidden');
+    }
+
+    async function handleAnswer({ answer }) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+
+    async function handleIceCandidate({ candidate }) {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+
+    function endCall() {
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      document.getElementById('localVideo').srcObject = null;
+      document.getElementById('remoteVideo').srcObject = null;
+      document.getElementById('callButton').classList.remove('hidden');
+      document.getElementById('endCallButton').classList.add('hidden');
+    }
+
+    document.getElementById('message').addEventListener('keypress', e => {
+      if (e.key === 'Enter') sendMessage();
+    });
+  </script>
+</body>
+</html>
