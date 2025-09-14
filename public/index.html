@@ -1,69 +1,57 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Général et Appels</title>
+  <title>Chat Général et Appels - Style Spotify</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #121212;
+    }
+    .message-bubble {
+      max-width: 70%;
+      word-wrap: break-word;
+    }
+    .message-bubble.sent {
+      background-color: #1db954;
+      color: white;
+    }
+    .message-bubble.received {
+      background-color: #2a2a2a;
+      color: white;
+    }
+  </style>
 </head>
 <body>
-  <div class="flex flex-col h-screen bg-gray-100 p-4">
-    <input id="username" placeholder="Ton pseudo" class="p-2 mb-2 rounded">
-    <button onclick="joinChat()" class="bg-blue-500 text-white p-2 rounded mb-2">Rejoindre</button>
-    <div class="flex-1 overflow-y-auto mb-2 bg-white rounded p-2" id="messages"></div>
-    <input id="message" placeholder="Ton message" class="p-2 mb-2 rounded">
-    <button onclick="sendMessage()" class="bg-blue-500 text-white p-2 rounded">Envoyer</button>
-    <select id="recipient" class="p-2 mb-2 rounded">
-      <option value="">Choisir un pote pour appeler</option>
-    </select>
-    <div class="flex space-x-2 mb-2">
-      <button onclick="startCall('video')" class="bg-green-500 text-white p-2 rounded" id="callButton" disabled>Appel Vidéo</button>
-      <button onclick="startCall('screen')" class="bg-green-600 text-white p-2 rounded" id="screenShareButton" disabled>Partager l'écran</button>
-      <button onclick="endCall()" class="bg-red-500 text-white p-2 rounded hidden" id="endCallButton">Terminer l'appel</button>
+  <div class="flex flex-col h-screen bg-[#121212] text-white p-6">
+    <div class="flex items-center mb-4">
+      <h1 class="text-2xl font-bold">Chat Général</h1>
     </div>
-    <div class="flex mt-2">
-      <video id="localVideo" autoplay muted class="w-1/2 h-64 bg-black mr-2"></video>
-      <video id="remoteVideo" autoplay class="w-1/2 h-64 bg-black"></video>
+    <div class="flex flex-col gap-4 mb-4">
+      <input id="username" placeholder="Ton pseudo" class="p-3 rounded-lg bg-[#2a2a2a] text-white border-none focus:ring-2 focus:ring-[#1db954]">
+      <button onclick="joinChat()" class="bg-[#1db954] text-black font-semibold p-3 rounded-lg hover:bg-[#1ed760] transition">Rejoindre</button>
+    </div>
+    <div class="flex-1 overflow-y-auto mb-4 bg-[#181818] rounded-lg p-4" id="messages"></div>
+    <div class="flex gap-2 mb-4">
+      <input id="message" placeholder="Ton message" class="flex-1 p-3 rounded-lg bg-[#2a2a2a] text-white border-none focus:ring-2 focus:ring-[#1db954]">
+      <button onclick="sendMessage()" class="bg-[#1db954] text-black font-semibold p-3 rounded-lg hover:bg-[#1ed760] transition">Envoyer</button>
+    </div>
+    <div class="flex flex-col gap-2 mb-4">
+      <select id="recipient" class="p-3 rounded-lg bg-[#2a2a2a] text-white border-none focus:ring-2 focus:ring-[#1db954]">
+        <option value="">Choisir un pote pour appeler</option>
+      </select>
+      <div class="flex gap-2">
+        <button onclick="startCall('video')" class="bg-[#1db954] text-black font-semibold p-3 rounded-lg hover:bg-[#1ed760] transition" id="callButton" disabled>Appel Vidéo</button>
+        <button onclick="startCall('screen')" class="bg-[#1db954] text-black font-semibold p-3 rounded-lg hover:bg-[#1ed760] transition" id="screenShareButton" disabled>Partager l'écran</button>
+        <button onclick="endCall()" class="bg-red-600 text-white font-semibold p-3 rounded-lg hover:bg-red-700 transition hidden" id="endCallButton">Terminer l'appel</button>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <video id="localVideo" autoplay muted class="w-1/2 h-64 bg-black rounded-lg"></video>
+      <video id="remoteVideo" autoplay class="w-1/2 h-64 bg-black rounded-lg"></video>
     </div>
   </div>
 
@@ -85,6 +73,30 @@
       ] 
     };
 
+    // Chargement et réinitialisation des messages
+    function loadMessages() {
+      const storedMessages = localStorage.getItem('chatMessages');
+      const lastReset = localStorage.getItem('lastReset');
+      const now = new Date().getTime();
+      const resetInterval = 5 * 24 * 60 * 60 * 1000; // 5 jours en millisecondes
+
+      if (lastReset && (now - lastReset > resetInterval)) {
+        localStorage.setItem('chatMessages', JSON.stringify([]));
+        localStorage.setItem('lastReset', now);
+        document.getElementById('messages').innerHTML = '';
+      } else if (!lastReset) {
+        localStorage.setItem('lastReset', now);
+      }
+
+      return storedMessages ? JSON.parse(storedMessages) : [];
+    }
+
+    function saveMessage(msg) {
+      const messages = loadMessages();
+      messages.push(msg);
+      localStorage.setItem('chatMessages', JSON.stringify(messages));
+    }
+
     function joinChat() {
       console.log('joinChat appelé');
       username = document.getElementById('username').value;
@@ -105,6 +117,7 @@
         document.getElementById('username').disabled = true;
         document.getElementById('callButton').disabled = false;
         document.getElementById('screenShareButton').disabled = false;
+        loadMessages().forEach(displayMessage);
       });
       
       socket.on('connect_error', (error) => {
@@ -123,6 +136,7 @@
       
       socket.on('message', (msg) => {
         console.log('Message reçu:', msg);
+        saveMessage(msg); // Sauvegarde dans localStorage
         displayMessage(msg);
       });
       
@@ -166,7 +180,7 @@
       const messages = document.getElementById('messages');
       const div = document.createElement('div');
       div.textContent = `${msg.from}: ${msg.text}`;
-      div.className = 'p-2 bg-gray-200 rounded mb-1';
+      div.className = `p-2 rounded-lg mb-2 message-bubble ${msg.from === username ? 'sent ml-auto' : 'received mr-auto'}`;
       messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
     }
@@ -176,6 +190,7 @@
       if (message) {
         console.log('Envoi message général:', message);
         socket.emit('message', { from: username, text: message });
+        saveMessage({ from: username, text: message }); // Sauvegarde localement
         displayMessage({ from: username, text: message });
         document.getElementById('message').value = '';
       } else {
